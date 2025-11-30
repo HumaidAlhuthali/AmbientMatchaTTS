@@ -9,6 +9,7 @@ from matcha import utils
 from matcha.models.baselightningmodule import BaseLightningClass
 from matcha.models.components.flow_matching import CFM
 from matcha.models.components.text_encoder import TextEncoder
+from matcha.utils.audio import load_vocoder, to_waveform
 from matcha.utils.model import (
     denormalize,
     duration_loss,
@@ -16,6 +17,7 @@ from matcha.utils.model import (
     generate_path,
     sequence_mask,
 )
+from matcha.utils.utils import get_user_data_dir, plot_tensor
 
 log = utils.get_pylogger(__name__)
 
@@ -243,3 +245,73 @@ class MatchaTTS(BaseLightningClass):  # 🍵
             prior_loss = 0
 
         return dur_loss, prior_loss, diff_loss, attn
+
+    def on_validation_end(self) -> None:
+        if self.trainer.is_global_zero:
+            one_batch = next(iter(self.trainer.val_dataloaders))
+            if self.current_epoch == 0:
+                log.debug("Plotting original samples")
+                for i in range(2):
+                    y = one_batch["y"][i].unsqueeze(0).to(self.device)
+                    self.logger.experiment.add_image(
+                        f"original/{i}",
+                        plot_tensor(y.squeeze().cpu()),
+                        self.current_epoch,
+                        dataformats="HWC",
+                    )
+
+            log.debug("Synthesising...")
+            # Load vocoder if not loaded
+            if not hasattr(self, "vocoder"):
+                # Logic to load vocoder
+                vocoder_name = "hifigan_T2_v1" if self.n_spks == 1 else "hifigan_univ_v1"
+                checkpoint_path = get_user_data_dir() / f"{vocoder_name}"
+                self.vocoder, self.denoiser = load_vocoder(vocoder_name, checkpoint_path, self.device)
+
+            temperatures = [0.667, 0.8, 1.0]
+            for temp in temperatures:
+                for i in range(2):
+                    x = one_batch["x"][i].unsqueeze(0).to(self.device)
+                    x_lengths = one_batch["x_lengths"][i].unsqueeze(0).to(self.device)
+                    spks = one_batch["spks"][i].unsqueeze(0).to(self.device) if one_batch["spks"] is not None else None
+                    output = self.synthesise(
+                        x[:, :x_lengths], x_lengths, n_timesteps=10, temperature=temp, spks=spks
+                    )
+                    y_enc, y_dec = output["encoder_outputs"], output["decoder_outputs"]
+                    attn = output["attn"]
+                    self.logger.experiment.add_image(
+                        f"generated_enc/{i}_T{temp}",
+                        plot_tensor(y_enc.squeeze().cpu()),
+                        self.current_epoch,
+                        dataformats="HWC",
+                    )
+                    self.logger.experiment.add_image(
+                        f"generated_dec/{i}_T{temp}",
+                        plot_tensor(y_dec.squeeze().cpu()),
+                        self.current_epoch,
+                        dataformats="HWC",
+                    )
+                    self.logger.experiment.add_image(
+                        f"alignment/{i}_T{temp}",
+                        plot_tensor(attn.squeeze().cpu()),
+                        self.current_epoch,
+                        dataformats="HWC",
+                    )
+
+                    # Convert to waveform
+                    waveform = to_waveform(output["mel"], self.vocoder, self.denoiser)
+
+                    # Log Audio
+                    try:
+                        if hasattr(self.logger.experiment, "add_audio"):
+                            # TensorBoard expects shape (1, samples) - channels first
+                            self.logger.experiment.add_audio(
+                                f"generated_audio/{i}_T{temp}",
+                                waveform.unsqueeze(0),
+                                self.current_epoch,
+                                sample_rate=22050,
+                            )
+                        else:
+                            log.warning("Logger experiment does not have add_audio method")
+                    except Exception as e:
+                        log.error(f"Failed to log audio: {e}")

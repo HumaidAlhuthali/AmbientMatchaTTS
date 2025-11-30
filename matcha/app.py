@@ -12,10 +12,9 @@ from matcha.cli import (
     assert_model_downloaded,
     get_device,
     load_matcha,
-    load_vocoder,
     process_text,
-    to_waveform,
 )
+from matcha.utils.audio import load_vocoder, to_waveform
 from matcha.utils.utils import get_user_data_dir, plot_tensor
 
 LOCATION = Path(get_user_data_dir())

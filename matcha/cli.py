@@ -9,12 +9,9 @@ import numpy as np
 import soundfile as sf
 import torch
 
-from matcha.hifigan.config import v1
-from matcha.hifigan.denoiser import Denoiser
-from matcha.hifigan.env import AttrDict
-from matcha.hifigan.models import Generator as HiFiGAN
 from matcha.models.matcha_tts import MatchaTTS
 from matcha.text import sequence_to_text, text_to_sequence
+from matcha.utils.audio import load_vocoder, to_waveform
 from matcha.utils.utils import assert_model_downloaded, get_user_data_dir, intersperse
 
 MATCHA_URLS = {
@@ -81,30 +78,6 @@ def assert_required_models_available(args):
     return {"matcha": model_path, "vocoder": vocoder_path}
 
 
-def load_hifigan(checkpoint_path, device):
-    h = AttrDict(v1)
-    hifigan = HiFiGAN(h).to(device)
-    hifigan.load_state_dict(torch.load(checkpoint_path, map_location=device)["generator"])
-    _ = hifigan.eval()
-    hifigan.remove_weight_norm()
-    return hifigan
-
-
-def load_vocoder(vocoder_name, checkpoint_path, device):
-    print(f"[!] Loading {vocoder_name}!")
-    vocoder = None
-    if vocoder_name in ("hifigan_T2_v1", "hifigan_univ_v1"):
-        vocoder = load_hifigan(checkpoint_path, device)
-    else:
-        raise NotImplementedError(
-            f"Vocoder {vocoder_name} not implemented! define a load_<<vocoder_name>> method for it"
-        )
-
-    denoiser = Denoiser(vocoder, mode="zeros")
-    print(f"[+] {vocoder_name} loaded!")
-    return vocoder, denoiser
-
-
 def load_matcha(model_name, checkpoint_path, device):
     print(f"[!] Loading {model_name}!")
     model = MatchaTTS.load_from_checkpoint(checkpoint_path, map_location=device)
@@ -112,14 +85,6 @@ def load_matcha(model_name, checkpoint_path, device):
 
     print(f"[+] {model_name} loaded!")
     return model
-
-
-def to_waveform(mel, vocoder, denoiser=None, denoiser_strength=0.00025):
-    audio = vocoder(mel).clamp(-1, 1)
-    if denoiser is not None:
-        audio = denoiser(audio.squeeze(), strength=denoiser_strength).cpu().squeeze()
-
-    return audio.cpu().squeeze()
 
 
 def save_to_folder(filename: str, output: dict, folder: str):
