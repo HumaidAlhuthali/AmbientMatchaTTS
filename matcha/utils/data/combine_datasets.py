@@ -160,6 +160,11 @@ def main():
     print(f"Writing combined val filelist: {val_output}")
     write_combined_filelist(val_output, combined_val)
 
+    # Write LJSpeech-only validation filelist for targeted validation
+    ljspeech_val_output = output_dir / "ljspeech_only_val.txt"
+    print(f"Writing LJSpeech-only val filelist: {ljspeech_val_output}")
+    write_combined_filelist(ljspeech_val_output, ljspeech_val_ms)
+
     # Print summary
     vctk_speakers = set(entry[1] for entry in vctk_train + vctk_val)
     max_speaker_id = max(max(vctk_speakers), args.ljspeech_speaker_id)
