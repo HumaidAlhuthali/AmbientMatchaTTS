@@ -1,23 +1,20 @@
 #!/usr/bin/env python
 """
-Script to download and prepare the VCTK dataset for Matcha-TTS training.
+Script to prepare the VCTK dataset for Matcha-TTS training.
 
-Downloads VCTK-Corpus-0.92, resamples audio from 48kHz to 22050Hz,
+Uses the Kaggle VCTK corpus (vctk_corpus.zip), resamples audio from 48kHz to 22050Hz,
 and creates multi-speaker format filelists (audio_path|speaker_id|text).
 """
 import argparse
 import random
-import tempfile
 import zipfile
 from pathlib import Path
 
 import torchaudio
-from torch.hub import download_url_to_file
 from tqdm import tqdm
 
-URL = "https://datashare.ed.ac.uk/bitstream/handle/10283/3443/VCTK-Corpus-0.92.zip"
-
-INFO_PAGE = "https://datashare.ed.ac.uk/handle/10283/3443"
+# Hardcoded path to the Kaggle VCTK corpus zip file
+ZIP_PATH = Path("data/vctk_corpus.zip")
 
 LICENCE = "Creative Commons Attribution 4.0 International (CC BY 4.0)"
 
@@ -41,15 +38,9 @@ def decision(val_ratio: float = 0.02):
 
 def get_args():
     parser = argparse.ArgumentParser(
-        description="Download and prepare VCTK dataset for Matcha-TTS"
+        description="Prepare VCTK dataset for Matcha-TTS (using Kaggle corpus)"
     )
 
-    parser.add_argument(
-        "-s", "--save-dir",
-        type=str,
-        default=None,
-        help="Directory to store the downloaded zip file (default: use temp file)"
-    )
     parser.add_argument(
         "output_dir",
         type=str,
@@ -65,13 +56,13 @@ def get_args():
     parser.add_argument(
         "--filelist-only",
         action="store_true",
-        help="Only generate filelists from existing data (skip download)"
+        help="Only generate filelists from existing data (skip extraction)"
     )
 
     return parser.parse_args()
 
 
-def extract_zip(zip_path: str, output_dir: Path):
+def extract_zip(zip_path: Path, output_dir: Path):
     """Extract zip file to output directory."""
     print(f"Extracting {zip_path} to {output_dir}...")
     with zipfile.ZipFile(zip_path, 'r') as zf:
@@ -100,18 +91,21 @@ def resample_audio(input_path: Path, output_path: Path, target_sr: int = TARGET_
 
 def process_vctk(vctk_path: Path, resample: bool = True):
     """Process VCTK dataset: resample audio and create filelists."""
-    # Find VCTK root (handle nested extraction)
-    if (vctk_path / "VCTK-Corpus-0.92").exists():
-        vctk_root = vctk_path / "VCTK-Corpus-0.92"
-    elif (vctk_path / "wav48_silence_trimmed").exists():
+    # Find VCTK root (handle Kaggle's double-nested structure: VCTK-Corpus/VCTK-Corpus/)
+    if (vctk_path / "VCTK-Corpus" / "VCTK-Corpus").exists():
+        vctk_root = vctk_path / "VCTK-Corpus" / "VCTK-Corpus"
+    elif (vctk_path / "VCTK-Corpus").exists():
+        vctk_root = vctk_path / "VCTK-Corpus"
+    elif (vctk_path / "wav48").exists():
         vctk_root = vctk_path
     else:
         raise FileNotFoundError(
             f"Could not find VCTK data in {vctk_path}. "
-            "Expected 'wav48_silence_trimmed' directory."
+            "Expected 'VCTK-Corpus/VCTK-Corpus/' or 'wav48/' directory."
         )
 
-    wav48_dir = vctk_root / "wav48_silence_trimmed"
+    # Kaggle version uses wav48/ (not wav48_silence_trimmed/)
+    wav48_dir = vctk_root / "wav48"
     txt_dir = vctk_root / "txt"
     
     if resample:
@@ -139,20 +133,14 @@ def process_vctk(vctk_path: Path, resample: bool = True):
             speaker_out_dir = wav_out_dir / speaker
             speaker_out_dir.mkdir(parents=True, exist_ok=True)
         
-        # Get all audio files for this speaker
-        audio_files = list(speaker_wav_dir.glob("*.flac")) + list(speaker_wav_dir.glob("*.wav"))
+        # Get all audio files for this speaker (Kaggle version uses .wav files)
+        audio_files = list(speaker_wav_dir.glob("*.wav"))
         
         for audio_file in audio_files:
             # Get corresponding text file
-            # VCTK uses format like p225_001_mic1.flac, text is p225_001.txt
+            # Kaggle VCTK uses simple format: p225_001.wav -> p225_001.txt
             base_name = audio_file.stem
-            # Remove mic suffix if present (e.g., _mic1, _mic2)
-            if "_mic" in base_name:
-                text_base = base_name.rsplit("_mic", 1)[0]
-            else:
-                text_base = base_name
-            
-            txt_file = speaker_txt_dir / f"{text_base}.txt"
+            txt_file = speaker_txt_dir / f"{base_name}.txt"
             
             if not txt_file.exists():
                 continue
@@ -226,30 +214,17 @@ def main():
         process_vctk(outpath, resample=not args.no_resample)
         return
     
-    save_dir = None
-    if args.save_dir:
-        save_dir = Path(args.save_dir)
-        if not save_dir.is_dir():
-            save_dir.mkdir(parents=True)
+    # Use hardcoded zip path
+    if not ZIP_PATH.exists():
+        raise FileNotFoundError(
+            f"VCTK corpus zip not found at {ZIP_PATH}. "
+            "Please download it from Kaggle and place it at data/vctk_corpus.zip"
+        )
     
-    if save_dir:
-        zip_name = URL.rsplit("/", maxsplit=1)[-1]
-        zip_file = save_dir / zip_name
-        if not zip_file.exists():
-            print(f"Downloading VCTK dataset to {zip_file}...")
-            print("(This is about 11GB, may take a while)")
-            download_url_to_file(URL, str(zip_file), progress=True)
-        extract_zip(str(zip_file), outpath)
-        process_vctk(outpath, resample=not args.no_resample)
-    else:
-        with tempfile.NamedTemporaryFile(suffix=".zip", delete=True) as zf:
-            print(f"Downloading VCTK dataset...")
-            print("(This is about 11GB, may take a while)")
-            download_url_to_file(URL, zf.name, progress=True)
-            extract_zip(zf.name, outpath)
-            process_vctk(outpath, resample=not args.no_resample)
+    print(f"Using VCTK corpus from {ZIP_PATH}")
+    extract_zip(ZIP_PATH, outpath)
+    process_vctk(outpath, resample=not args.no_resample)
 
 
 if __name__ == "__main__":
     main()
-
