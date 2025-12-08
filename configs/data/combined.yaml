@@ -1,0 +1,14 @@
+defaults:
+  - ljspeech
+  - _self_
+
+_target_: matcha.data.text_mel_datamodule.TextMelDataModule
+name: combined
+train_filelist_path: data/filelists/combined_train.txt
+valid_filelist_path: data/filelists/combined_val.txt
+num_workers: 2  # Add this line to override ljspeech default
+n_spks: 110  # 109 VCTK + 1 LJSpeech
+data_statistics: 
+  mel_mean: -6.337929 
+  mel_std: 2.432408
+
