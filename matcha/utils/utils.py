@@ -25,6 +25,7 @@ def extras(cfg: DictConfig) -> None:
         - Ignoring python warnings
         - Setting tags from command line
         - Rich config printing
+        - Setting float32 matmul precision for Tensor Cores
 
     :param cfg: A DictConfig object containing the config tree.
     """
@@ -32,6 +33,12 @@ def extras(cfg: DictConfig) -> None:
     if not cfg.get("extras"):
         log.warning("Extras config not found! <cfg.extras=null>")
         return
+
+    # set float32 matmul precision for Tensor Cores (should be set early)
+    if cfg.extras.get("float32_matmul_precision"):
+        precision = cfg.extras.float32_matmul_precision
+        log.info(f"Setting float32 matmul precision! <cfg.extras.float32_matmul_precision={precision}>")
+        torch.set_float32_matmul_precision(precision)
 
     # disable python warnings
     if cfg.extras.get("ignore_warnings"):
