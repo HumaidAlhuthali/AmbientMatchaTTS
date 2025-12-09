@@ -84,7 +84,7 @@ class BASECFM(torch.nn.Module, ABC):
 
         return sol[-1]
 
-    def compute_loss(self, x1, mask, mu, spks=None, cond=None):
+    def compute_loss(self, x1, mask, mu, spks=None, cond=None, t=None):
         """Computes diffusion loss
 
         Args:
@@ -96,16 +96,19 @@ class BASECFM(torch.nn.Module, ABC):
                 shape: (batch_size, n_feats, mel_timesteps)
             spks (torch.Tensor, optional): speaker embedding. Defaults to None.
                 shape: (batch_size, spk_emb_dim)
+            t (torch.Tensor, optional): pre-sampled timestep. Defaults to None.
+                shape: (batch_size, 1, 1)
 
         Returns:
             loss: conditional flow matching loss
             y: conditional flow
                 shape: (batch_size, n_feats, mel_timesteps)
         """
-        b, _, t = mu.shape
+        b, _, _ = mu.shape
 
-        # random timestep
-        t = torch.rand([b, 1, 1], device=mu.device, dtype=mu.dtype)
+        # Use provided t or sample uniformly from [0, 1]
+        if t is None:
+            t = torch.rand([b, 1, 1], device=mu.device, dtype=mu.dtype)
         # sample noise p(x_0)
         z = torch.randn_like(x1)
 

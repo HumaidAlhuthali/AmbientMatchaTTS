@@ -14,3 +14,4 @@ data_statistics: ${data.data_statistics}
 out_size: null # Must be divisible by 4
 prior_loss: true
 use_precomputed_durations: ${data.load_durations}
+non_target_speaker_t_max: 0.5  # t_max for speakers other than LJSpeech (ID 109)

@@ -38,6 +38,7 @@ class MatchaTTS(BaseLightningClass):  # 🍵
         scheduler=None,
         prior_loss=True,
         use_precomputed_durations=False,
+        non_target_speaker_t_max=0.5,
     ):
         super().__init__()
 
@@ -50,6 +51,7 @@ class MatchaTTS(BaseLightningClass):  # 🍵
         self.out_size = out_size
         self.prior_loss = prior_loss
         self.use_precomputed_durations = use_precomputed_durations
+        self.non_target_speaker_t_max = non_target_speaker_t_max
 
         if n_spks > 1:
             self.spk_emb = torch.nn.Embedding(n_spks, spk_emb_dim)
@@ -173,6 +175,9 @@ class MatchaTTS(BaseLightningClass):  # 🍵
             spks (torch.Tensor, optional): speaker ids.
                 shape: (batch_size,)
         """
+        # Save raw speaker IDs for t_max selection
+        raw_spks = spks
+
         if self.n_spks > 1:
             # Get speaker embedding
             spks = self.spk_emb(spks)
@@ -235,8 +240,18 @@ class MatchaTTS(BaseLightningClass):  # 🍵
         mu_y = torch.matmul(attn.squeeze(1).transpose(1, 2), mu_x.transpose(1, 2))
         mu_y = mu_y.transpose(1, 2)
 
+        # Sample t with speaker-dependent t_max
+        # LJSpeech (ID 109): t_max=1.0, other speakers: t_max=non_target_speaker_t_max
+        b = y.shape[0]
+        t_max = torch.where(
+            raw_spks == 109,
+            torch.ones(b, device=y.device),
+            torch.full((b,), self.non_target_speaker_t_max, device=y.device)
+        ).view(b, 1, 1)
+        t = torch.rand([b, 1, 1], device=y.device, dtype=y.dtype) * t_max
+
         # Compute loss of the decoder
-        diff_loss, _ = self.decoder.compute_loss(x1=y, mask=y_mask, mu=mu_y, spks=spks, cond=cond)
+        diff_loss, _ = self.decoder.compute_loss(x1=y, mask=y_mask, mu=mu_y, spks=spks, cond=cond, t=t)
 
         if self.prior_loss:
             prior_loss = torch.sum(0.5 * ((y - mu_y) ** 2 + math.log(2 * math.pi)) * y_mask)
