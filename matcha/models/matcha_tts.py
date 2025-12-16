@@ -268,12 +268,7 @@ class MatchaTTS(BaseLightningClass):  # 🍵
                 log.debug("Plotting original samples")
                 for i in range(2):
                     y = one_batch["y"][i].unsqueeze(0).to(self.device)
-                    self.logger.experiment.add_image(
-                        f"original/{i}",
-                        plot_tensor(y.squeeze().cpu()),
-                        self.current_epoch,
-                        dataformats="HWC",
-                    )
+                    self.log_image(f"original/{i}", plot_tensor(y.squeeze().cpu()), self.current_epoch)
 
             log.debug("Synthesising...")
             # Load vocoder if not loaded
@@ -283,7 +278,7 @@ class MatchaTTS(BaseLightningClass):  # 🍵
                 checkpoint_path = get_user_data_dir() / f"{vocoder_name}"
                 self.vocoder, self.denoiser = load_vocoder(vocoder_name, checkpoint_path, self.device)
 
-            temperatures = [0.667, 0.8, 1.0]
+            temperatures = [1.0] # fixing one temperature for now [0.667, 0.8, 1.0] 
             for temp in temperatures:
                 for i in range(2):
                     x = one_batch["x"][i].unsqueeze(0).to(self.device)
@@ -294,39 +289,12 @@ class MatchaTTS(BaseLightningClass):  # 🍵
                     )
                     y_enc, y_dec = output["encoder_outputs"], output["decoder_outputs"]
                     attn = output["attn"]
-                    self.logger.experiment.add_image(
-                        f"generated_enc/{i}_T{temp}",
-                        plot_tensor(y_enc.squeeze().cpu()),
-                        self.current_epoch,
-                        dataformats="HWC",
-                    )
-                    self.logger.experiment.add_image(
-                        f"generated_dec/{i}_T{temp}",
-                        plot_tensor(y_dec.squeeze().cpu()),
-                        self.current_epoch,
-                        dataformats="HWC",
-                    )
-                    self.logger.experiment.add_image(
-                        f"alignment/{i}_T{temp}",
-                        plot_tensor(attn.squeeze().cpu()),
-                        self.current_epoch,
-                        dataformats="HWC",
-                    )
+                    self.log_image(f"generated_enc/{i}_T{temp}", plot_tensor(y_enc.squeeze().cpu()), self.current_epoch)
+                    self.log_image(f"generated_dec/{i}_T{temp}", plot_tensor(y_dec.squeeze().cpu()), self.current_epoch)
+                    self.log_image(f"alignment/{i}_T{temp}", plot_tensor(attn.squeeze().cpu()), self.current_epoch)
 
                     # Convert to waveform
                     waveform = to_waveform(output["mel"], self.vocoder, self.denoiser)
 
                     # Log Audio
-                    try:
-                        if hasattr(self.logger.experiment, "add_audio"):
-                            # TensorBoard expects shape (1, samples) - channels first
-                            self.logger.experiment.add_audio(
-                                f"generated_audio/{i}_T{temp}",
-                                waveform.unsqueeze(0),
-                                self.current_epoch,
-                                sample_rate=22050,
-                            )
-                        else:
-                            log.warning("Logger experiment does not have add_audio method")
-                    except Exception as e:
-                        log.error(f"Failed to log audio: {e}")
+                    self.log_audio(f"generated_audio/{i}_T{temp}", waveform, self.current_epoch)

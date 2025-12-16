@@ -17,6 +17,26 @@ log = utils.get_pylogger(__name__)
 
 
 class BaseLightningClass(LightningModule, ABC):
+    def log_image(self, tag: str, image, step: int):
+        """Log image to TensorBoard or WandB."""
+        from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+
+        if isinstance(self.logger, TensorBoardLogger):
+            self.logger.experiment.add_image(tag, image, step, dataformats="HWC")
+        elif isinstance(self.logger, WandbLogger):
+            import wandb
+            self.logger.experiment.log({tag: wandb.Image(image)}, step=self.global_step)
+
+    def log_audio(self, tag: str, audio, step: int, sample_rate: int = 22050):
+        """Log audio to TensorBoard or WandB."""
+        from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+
+        if isinstance(self.logger, TensorBoardLogger):
+            self.logger.experiment.add_audio(tag, audio.unsqueeze(0), step, sample_rate=sample_rate)
+        elif isinstance(self.logger, WandbLogger):
+            import wandb
+            self.logger.experiment.log({tag: wandb.Audio(audio.cpu().numpy(), sample_rate=sample_rate)}, step=self.global_step)
+
     def update_data_statistics(self, data_statistics):
         if data_statistics is None:
             data_statistics = {
@@ -78,6 +98,7 @@ class BaseLightningClass(LightningModule, ABC):
 
     def training_step(self, batch: Any, batch_idx: int):
         loss_dict = self.get_losses(batch)
+
         self.log(
             "step",
             float(self.global_step),
@@ -172,12 +193,7 @@ class BaseLightningClass(LightningModule, ABC):
                 log.debug("Plotting original samples")
                 for i in range(2):
                     y = one_batch["y"][i].unsqueeze(0).to(self.device)
-                    self.logger.experiment.add_image(
-                        f"original/{i}",
-                        plot_tensor(y.squeeze().cpu()),
-                        self.current_epoch,
-                        dataformats="HWC",
-                    )
+                    self.log_image(f"original/{i}", plot_tensor(y.squeeze().cpu()), self.current_epoch)
 
             log.debug("Synthesising...")
             for i in range(2):
@@ -187,24 +203,9 @@ class BaseLightningClass(LightningModule, ABC):
                 output = self.synthesise(x[:, :x_lengths], x_lengths, n_timesteps=10, spks=spks)
                 y_enc, y_dec = output["encoder_outputs"], output["decoder_outputs"]
                 attn = output["attn"]
-                self.logger.experiment.add_image(
-                    f"generated_enc/{i}",
-                    plot_tensor(y_enc.squeeze().cpu()),
-                    self.current_epoch,
-                    dataformats="HWC",
-                )
-                self.logger.experiment.add_image(
-                    f"generated_dec/{i}",
-                    plot_tensor(y_dec.squeeze().cpu()),
-                    self.current_epoch,
-                    dataformats="HWC",
-                )
-                self.logger.experiment.add_image(
-                    f"alignment/{i}",
-                    plot_tensor(attn.squeeze().cpu()),
-                    self.current_epoch,
-                    dataformats="HWC",
-                )
+                self.log_image(f"generated_enc/{i}", plot_tensor(y_enc.squeeze().cpu()), self.current_epoch)
+                self.log_image(f"generated_dec/{i}", plot_tensor(y_dec.squeeze().cpu()), self.current_epoch)
+                self.log_image(f"alignment/{i}", plot_tensor(attn.squeeze().cpu()), self.current_epoch)
 
     def on_before_optimizer_step(self, optimizer):
         self.log_dict({f"grad_norm/{k}": v for k, v in grad_norm(self, norm_type=2).items()})

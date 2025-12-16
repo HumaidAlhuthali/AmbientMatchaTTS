@@ -1,20 +1,22 @@
 #!/bin/bash
 # SLURM Batch Script for Training Matcha-TTS
-# Usage: ./train_matcha.sh <dataset_name> <partition> <num_gpus> <time>
-# Example: ./train_matcha.sh ljspeech mit_preemptable 1 48:00:00
+# Usage: ./train_matcha.sh <dataset_name> <partition> <num_gpus> <time> [t_max]
+# Example: ./train_matcha.sh ljspeech mit_preemptable 1 48:00:00 0.5
 
 # Check if all required parameters are provided
 if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ]; then
-    echo "Error: All parameters are required."
-    echo "Usage: $0 <dataset_name> <partition> <num_gpus> <time>"
+    echo "Error: Required parameters are missing."
+    echo "Usage: $0 <dataset_name> <partition> <num_gpus> <time> [t_max]"
     echo ""
     echo "Parameters:"
     echo "  dataset_name: ljspeech, multispeaker (vctk), hi-fi_en-US_female, combined (ljspeech + vctk)"
     echo "  partition:    mit_preemptable or mit_normal_gpu"
     echo "  num_gpus:     Number of GPUs to request (e.g., 1, 2, 4)"
     echo "  time:         Job time limit (e.g., 48:00:00, 24:00:00)"
+    echo "  t_max:        (optional) t_max for non-LJSpeech speakers (default: 0.5)"
     echo ""
     echo "Example: $0 ljspeech mit_preemptable 1 48:00:00"
+    echo "Example: $0 combined mit_preemptable 2 48:00:00 0.7"
     exit 1
 fi
 
@@ -22,6 +24,7 @@ DATASET=$1
 PARTITION=$2
 NUM_GPUS=$3
 TIME=$4
+T_MAX=${5:-0.5}  # Default to 0.5 if not provided
 JOB_NAME="matcha_${DATASET}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_DIR="${HOME}/Matcha-TTS/slurm_logs"
@@ -65,14 +68,12 @@ echo "Dataset: DATASET_PLACEHOLDER"
 echo "Partition: PARTITION_PLACEHOLDER"
 echo "GPUs: NUM_GPUS_PLACEHOLDER"
 echo "Time Limit: TIME_PLACEHOLDER"
+echo "t_max (non-LJSpeech): T_MAX_PLACEHOLDER"
 echo "Start Time: $(date)"
 echo "=========================================="
 
-# Set environment variables for GPU
-export CUDA_VISIBLE_DEVICES=${SLURM_LOCALID}
-
 # Run training
-python matcha/train.py experiment=DATASET_PLACEHOLDER data.batch_size=128 data.num_workers=2 trainer=ddp trainer.max_epochs=98
+python matcha/train.py experiment=DATASET_PLACEHOLDER run_name="DATASET_PLACEHOLDER_tmax_T_MAX_PLACEHOLDER" data.batch_size=512 model.out_size=256 data.num_workers=2 trainer.max_epochs=500 model.non_target_speaker_t_max=T_MAX_PLACEHOLDER trainer=ddp
 
 # Print completion time
 echo "=========================================="
@@ -87,6 +88,7 @@ sed -i "s|DATASET_PLACEHOLDER|${DATASET}|g" ${BATCH_SCRIPT}
 sed -i "s|PARTITION_PLACEHOLDER|${PARTITION}|g" ${BATCH_SCRIPT}
 sed -i "s|NUM_GPUS_PLACEHOLDER|${NUM_GPUS}|g" ${BATCH_SCRIPT}
 sed -i "s|TIME_PLACEHOLDER|${TIME}|g" ${BATCH_SCRIPT}
+sed -i "s|T_MAX_PLACEHOLDER|${T_MAX}|g" ${BATCH_SCRIPT}
 
 # Submit the job
 echo "Submitting Matcha-TTS training job:"
@@ -94,6 +96,7 @@ echo "  Dataset:   ${DATASET}"
 echo "  Partition: ${PARTITION}"
 echo "  GPUs:      ${NUM_GPUS}"
 echo "  Time:      ${TIME}"
+echo "  t_max:     ${T_MAX}"
 echo "Log files will be saved to: ${LOG_DIR}"
 sbatch ${BATCH_SCRIPT}
 
